@@ -36,6 +36,7 @@ So, we do not see a simple alternative - but everyone is welcome to implement
 one :-) */
 
 
+#include <sequoia.h>
 #include <netpgp-extra.h>
 #include <openssl/rand.h>
 #include "dc_context.h"
@@ -413,30 +414,18 @@ cleanup:
 int dc_pgp_is_valid_key(dc_context_t* context, const dc_key_t* raw_key)
 {
 	int             key_is_valid = 0;
-	pgp_keyring_t*  public_keys = calloc(1, sizeof(pgp_keyring_t));
-	pgp_keyring_t*  private_keys = calloc(1, sizeof(pgp_keyring_t));
-	pgp_memory_t*   keysmem = pgp_memory_new();
+	sq_tpk_t        tpk;
 
 	if (context==NULL || raw_key==NULL
-	 || raw_key->binary==NULL || raw_key->bytes <= 0
-	 || public_keys==NULL || private_keys==NULL || keysmem==NULL) {
+	 || raw_key->binary==NULL || raw_key->bytes <= 0) {
 		goto cleanup;
 	}
 
-	pgp_memory_add(keysmem, raw_key->binary, raw_key->bytes);
-	pgp_filter_keys_from_mem(&s_io, public_keys, private_keys, NULL, 0, keysmem); /* function returns 0 on any error in any packet - this does not mean, we cannot use the key. We check the details below therefore. */
-
-	if (raw_key->type==DC_KEY_PUBLIC && public_keys->keyc >= 1) {
-		key_is_valid = 1;
-	}
-	else if (raw_key->type==DC_KEY_PRIVATE && private_keys->keyc >= 1) {
-		key_is_valid = 1;
-	}
+	tpk = sq_tpk_from_bytes(context->sq, raw_key->binary, raw_key->bytes);
+	key_is_valid = tpk != NULL;
+	sq_tpk_free(tpk);
 
 cleanup:
-	if (keysmem)      { pgp_memory_free(keysmem); }
-	if (public_keys)  { pgp_keyring_purge(public_keys); free(public_keys); } /*pgp_keyring_free() frees the content, not the pointer itself*/
-	if (private_keys) { pgp_keyring_purge(private_keys); free(private_keys); }
 	return key_is_valid;
 }
 
