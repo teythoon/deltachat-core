@@ -127,6 +127,7 @@ dc_context_t* dc_context_new(dc_callback_t cb, void* userdata, const char* os_na
 
 	dc_pgp_init();
 	context->sql      = dc_sqlite3_new(context);
+	context->sq       = sq_context_new("chat.delta", NULL);
 	context->imap     = dc_imap_new(cb_get_config, cb_set_config, cb_receive_imf, (void*)context, context);
 	context->smtp     = dc_smtp_new(context);
 
@@ -169,6 +170,7 @@ void dc_context_unref(dc_context_t* context)
 	dc_imap_unref(context->imap);
 	dc_smtp_unref(context->smtp);
 	dc_sqlite3_unref(context->sql);
+	sq_context_free(context->sq);
 
 	dc_openssl_exit();
 

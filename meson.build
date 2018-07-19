@@ -11,6 +11,7 @@ zlib = dependency('zlib')
 openssl = dependency('openssl')
 sasl = dependency('libsasl2')
 sqlite = dependency('sqlite3')
+sequoia = dependency('sequoia')
 
 
 # Optionally use the system libetpan

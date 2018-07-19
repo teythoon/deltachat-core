@@ -70,7 +70,7 @@ lib_inc = include_directories('.')
 
 lib = library(
   'deltachat', lib_src,
-  dependencies: [zlib, openssl, pthreads, sasl, sqlite, etpan, netpgp],
+  dependencies: [zlib, openssl, pthreads, sasl, sqlite, etpan, netpgp, sequoia],
   include_directories: lib_inc,
   install: true,
 )

@@ -32,6 +32,7 @@ extern "C" {
 #include <string.h>
 #include <pthread.h>
 #include <libetpan/libetpan.h>
+#include <sequoia.h>
 #include "deltachat.h"
 #include "dc_sqlite3.h"
 #include "dc_tools.h"
@@ -68,6 +69,7 @@ struct _dc_context
 	char*            blobdir;               /**< Full path of the blob directory. This is the directory given to dc_context_new() or a directory in the same directory as dc_context_t::dbfile. */
 
 	dc_sqlite3_t*    sql;                   /**< Internal SQL object, never NULL */
+	sq_context_t     sq;                    /**< Internal Sequoia object, never NULL */
 
 	dc_imap_t*       imap;                  /**< Internal IMAP object, never NULL */
 	pthread_mutex_t  imapidle_condmutex;
