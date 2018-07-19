@@ -470,46 +470,35 @@ cleanup:
 int dc_pgp_split_key(dc_context_t* context, const dc_key_t* private_in, dc_key_t* ret_public_key)
 {
 	int             success = 0;
-	pgp_keyring_t*  public_keys = calloc(1, sizeof(pgp_keyring_t));
-	pgp_keyring_t*  private_keys = calloc(1, sizeof(pgp_keyring_t));
-	pgp_memory_t*   keysmem = pgp_memory_new();
-	pgp_memory_t*   pubmem = pgp_memory_new();
-	pgp_output_t*   pubout = pgp_output_new();
+	sq_tpk_t        tsk;
+	sq_tpk_t        tpk;
+	void*           buf = NULL;
+	size_t          len = 0;
+	sq_writer_t	w;
 
-	if (context==NULL || private_in==NULL || ret_public_key==NULL
-	 || public_keys==NULL || private_keys==NULL || keysmem==NULL || pubmem==NULL || pubout==NULL) {
+	if (context==NULL || private_in==NULL || ret_public_key==NULL) {
 		goto cleanup;
 	}
 
-	pgp_memory_add(keysmem, private_in->binary, private_in->bytes);
-	pgp_filter_keys_from_mem(&s_io, public_keys, private_keys, NULL, 0, keysmem);
-
-	if (private_in->type!=DC_KEY_PRIVATE || private_keys->keyc <= 0) {
-		dc_log_warning(context, 0, "Split key: Given key is no private key.");
+	tsk = sq_tpk_from_bytes(context->sq, private_in->binary, private_in->bytes);
+	if (tsk==NULL) {
 		goto cleanup;
 	}
 
-	if (public_keys->keyc <= 0) {
-		dc_log_warning(context, 0, "Split key: Given key does not contain a public key.");
-		goto cleanup;
-	}
+	tpk = sq_tpk_to_public_key(tsk);
+	sq_tpk_free(tsk);
 
-	pgp_writer_set_memory(pubout, pubmem);
-	if (!pgp_write_xfer_key(pubout, &public_keys->keys[0], 0/*armored*/)
-	 || pubmem->buf==NULL || pubmem->length <= 0) {
-		goto cleanup;
-	}
+	w = sq_writer_alloc(&buf, &len);
+	sq_tpk_serialize(context->sq, tpk, w);
+	sq_tpk_free(tpk);
+	sq_writer_free(w);
 
-	dc_key_set_from_binary(ret_public_key, pubmem->buf, pubmem->length, DC_KEY_PUBLIC);
+	dc_key_set_from_binary(ret_public_key, buf, len, DC_KEY_PUBLIC);
+	free(buf);
 
 	success = 1;
 
 cleanup:
-	if (pubout)       { pgp_output_delete(pubout); }
-	if (pubmem)       { pgp_memory_free(pubmem); }
-	if (keysmem)      { pgp_memory_free(keysmem); }
-	if (public_keys)  { pgp_keyring_purge(public_keys); free(public_keys); } /*pgp_keyring_free() frees the content, not the pointer itself*/
-	if (private_keys) { pgp_keyring_purge(private_keys); free(private_keys); }
 	return success;
 }
 
