@@ -433,39 +433,36 @@ cleanup:
 int dc_pgp_calc_fingerprint(const dc_key_t* raw_key, uint8_t** ret_fingerprint, size_t* ret_fingerprint_bytes)
 {
 	int             success = 0;
-	pgp_keyring_t*  public_keys = calloc(1, sizeof(pgp_keyring_t));
-	pgp_keyring_t*  private_keys = calloc(1, sizeof(pgp_keyring_t));
-	pgp_memory_t*   keysmem = pgp_memory_new();
+	sq_context_t    ctx;
+	sq_tpk_t        tpk;
+	sq_fingerprint_t fp;
+	uint8_t*         fp_bytes;
 
 	if (raw_key==NULL || ret_fingerprint==NULL || *ret_fingerprint!=NULL || ret_fingerprint_bytes==NULL || *ret_fingerprint_bytes!=0
-	 || raw_key->binary==NULL || raw_key->bytes <= 0
-	 || public_keys==NULL || private_keys==NULL || keysmem==NULL) {
+	 || raw_key->binary==NULL || raw_key->bytes <= 0) {
 		goto cleanup;
 	}
 
-	pgp_memory_add(keysmem, raw_key->binary, raw_key->bytes);
-	pgp_filter_keys_from_mem(&s_io, public_keys, private_keys, NULL, 0, keysmem);
-
-	if (raw_key->type != DC_KEY_PUBLIC || public_keys->keyc <= 0) {
+	ctx = sq_context_new("delta.chat", NULL);
+	tpk = sq_tpk_from_bytes(ctx, raw_key->binary, raw_key->bytes);
+	sq_context_free(ctx);
+	if (tpk==NULL) {
 		goto cleanup;
 	}
 
-	pgp_key_t* key0 = &public_keys->keys[0];
-	pgp_pubkey_t* pubkey0 = &key0->key.pubkey;
-	if (!pgp_fingerprint(&key0->pubkeyfpr, pubkey0, 0)) {
+	fp = sq_tpk_fingerprint(tpk);
+	sq_tpk_free(tpk);
+	if (fp==NULL) {
 		goto cleanup;
 	}
 
-	*ret_fingerprint_bytes = key0->pubkeyfpr.length;
-    *ret_fingerprint = malloc(*ret_fingerprint_bytes);
-	memcpy(*ret_fingerprint, key0->pubkeyfpr.fingerprint, *ret_fingerprint_bytes);
-
+	fp_bytes = sq_fingerprint_as_bytes(fp, ret_fingerprint_bytes);
+	*ret_fingerprint = malloc(*ret_fingerprint_bytes);
+	memcpy(*ret_fingerprint, fp_bytes, *ret_fingerprint_bytes);
+	sq_fingerprint_free(fp);
 	success = 1;
 
 cleanup:
-	if (keysmem)      { pgp_memory_free(keysmem); }
-	if (public_keys)  { pgp_keyring_purge(public_keys); free(public_keys); } /*pgp_keyring_free() frees the content, not the pointer itself*/
-	if (private_keys) { pgp_keyring_purge(private_keys); free(private_keys); }
 	return success;
 }
 
