@@ -517,85 +517,102 @@ int dc_pgp_pk_encrypt( dc_context_t*       context,
                        void**              ret_ctext,
                        size_t*             ret_ctext_bytes)
 {
-	pgp_keyring_t*  public_keys = calloc(1, sizeof(pgp_keyring_t));
-	pgp_keyring_t*  private_keys = calloc(1, sizeof(pgp_keyring_t));
-	pgp_keyring_t*  dummy_keys = calloc(1, sizeof(pgp_keyring_t));
-	pgp_memory_t*   keysmem = pgp_memory_new();
-	pgp_memory_t*   signedmem = NULL;
 	int             i = 0;
 	int             success = 0;
+	sq_status_t     rc;
+	sq_writer_t     sink;
+	sq_writer_stack_t writer = NULL;
+	size_t          recipients_len = 0;
+	sq_tpk_t*       recipients = NULL;
+	sq_tpk_t        signing_key = NULL;
 
 	if (context==NULL || plain_text==NULL || plain_bytes==0 || ret_ctext==NULL || ret_ctext_bytes==NULL
-	 || raw_public_keys_for_encryption==NULL || raw_public_keys_for_encryption->count<=0
-	 || keysmem==NULL || public_keys==NULL || private_keys==NULL || dummy_keys==NULL) {
+	 || raw_public_keys_for_encryption==NULL || raw_public_keys_for_encryption->count<=0) {
 		goto cleanup;
 	}
 
 	*ret_ctext       = NULL;
 	*ret_ctext_bytes = 0;
+	sink = sq_writer_alloc(ret_ctext, ret_ctext_bytes);
 
-	/* setup keys (the keys may come from pgp_filter_keys_fileread(), see also pgp_keyring_add(rcpts, key)) */
-	for (i = 0; i < raw_public_keys_for_encryption->count; i++) {
-		pgp_memory_clear(keysmem);
-		pgp_memory_add(keysmem, raw_public_keys_for_encryption->keys[i]->binary, raw_public_keys_for_encryption->keys[i]->bytes);
-		pgp_filter_keys_from_mem(&s_io, public_keys, private_keys/*should stay empty*/, NULL, 0, keysmem);
+	if (use_armor) {
+		sink = sq_armor_writer_new(sink, SQ_ARMOR_KIND_MESSAGE);
 	}
 
-	if (public_keys->keyc <=0 || private_keys->keyc!=0) {
-		dc_log_warning(context, 0, "Encryption-keyring contains unexpected data (%i/%i)", public_keys->keyc, private_keys->keyc);
+	recipients = calloc(raw_public_keys_for_encryption->count, sizeof(sq_tpk_t));
+	if (!recipients) {
+		exit(40);
+	}
+
+	for (i = 0; i < raw_public_keys_for_encryption->count; i++) {
+		sq_tpk_t tpk;
+		tpk = sq_tpk_from_bytes(context->sq,
+					raw_public_keys_for_encryption->keys[i]->binary,
+					raw_public_keys_for_encryption->keys[i]->bytes);
+		if (tpk) {
+			recipients[recipients_len] = tpk;
+			recipients_len += 1;
+		} else {
+			/* XXX: What should happen if parsing the TPK fails?  */
+		}
+	}
+
+	writer = sq_writer_stack_wrap(sink);
+	writer = sq_encryptor_new(context->sq,
+				  writer,
+				  NULL, 0, /* no passwords */
+				  recipients, recipients_len,
+				  SQ_ENCRYPTION_MODE_FOR_TRANSPORT);
+	if (writer==NULL) {
 		goto cleanup;
 	}
 
-	/* encrypt */
-	{
-		const void* signed_text = NULL;
-		size_t      signed_bytes = 0;
-		int         encrypt_raw_packet = 0;
-
-		if (raw_private_key_for_signing) {
-			pgp_memory_clear(keysmem);
-			pgp_memory_add(keysmem, raw_private_key_for_signing->binary, raw_private_key_for_signing->bytes);
-			pgp_filter_keys_from_mem(&s_io, dummy_keys, private_keys, NULL, 0, keysmem);
-			if (private_keys->keyc <= 0) {
-				dc_log_warning(context, 0, "No key for signing found.");
+	if (raw_private_key_for_signing) {
+		signing_key = sq_tpk_from_bytes(context->sq,
+						raw_private_key_for_signing->binary,
+						raw_private_key_for_signing->bytes);
+		if (signing_key) {
+			writer = sq_signer_new(context->sq,
+					       writer,
+					       &signing_key, 1);
+			if (writer==NULL) {
 				goto cleanup;
 			}
-
-			pgp_key_t* sk0 = &private_keys->keys[0];
-			signedmem = pgp_sign_buf(&s_io, plain_text, plain_bytes, &sk0->key.seckey, time(NULL)/*birthtime*/, 0/*duration*/,
-				NULL/*hash, defaults to sha256*/, 0/*armored*/, 0/*cleartext*/);
-			if (signedmem==NULL) {
-				dc_log_warning(context, 0, "Signing failed.");
-				goto cleanup;
-			}
-			signed_text        = signedmem->buf;
-			signed_bytes       = signedmem->length;
-			encrypt_raw_packet = 1;
+		} else {
+			/* XXX: What should happen if parsing the TPK fails?  */
 		}
-		else {
-			signed_text        = plain_text;
-			signed_bytes       = plain_bytes;
-			encrypt_raw_packet = 0;
-		}
+	}
 
-		pgp_memory_t* outmem = pgp_encrypt_buf(&s_io, signed_text, signed_bytes, public_keys, use_armor, NULL/*cipher*/, encrypt_raw_packet);
-		if (outmem==NULL) {
-			dc_log_warning(context, 0, "Encryption failed.");
+	writer = sq_literal_writer_new(context->sq, writer);
+	if (writer==NULL) {
+		goto cleanup;
+	}
+
+	while (plain_bytes) {
+		ssize_t written;
+		written = sq_writer_stack_write(context->sq, writer, plain_text, plain_bytes);
+		if (written < 0) {
 			goto cleanup;
 		}
-		*ret_ctext       = outmem->buf;
-		*ret_ctext_bytes = outmem->length;
-		free(outmem); /* do not use pgp_memory_free() as we took ownership of the buffer */
+		plain_text += written;
+		plain_bytes -= written;
+	}
+
+	rc = sq_writer_stack_finalize(context->sq, writer);
+	writer = NULL;
+	if (rc) {
+		goto cleanup;
 	}
 
 	success = 1;
 
 cleanup:
-	if (keysmem)      { pgp_memory_free(keysmem); }
-	if (signedmem)    { pgp_memory_free(signedmem); }
-	if (public_keys)  { pgp_keyring_purge(public_keys); free(public_keys); } /*pgp_keyring_free() frees the content, not the pointer itself*/
-	if (private_keys) { pgp_keyring_purge(private_keys); free(private_keys); }
-	if (dummy_keys)   { pgp_keyring_purge(dummy_keys); free(dummy_keys); }
+	for (i = 0; i < recipients_len; i++) {
+		sq_tpk_free(recipients[i]);
+	}
+	free(recipients);
+	sq_tpk_free(signing_key);
+	sq_writer_stack_finalize(context->sq, writer);
 	return success;
 }
 
