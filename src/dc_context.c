@@ -25,6 +25,7 @@
 #include <unistd.h>
 #include <openssl/opensslv.h>
 #include <assert.h>
+#include <sequoia.h>
 #include "dc_context.h"
 #include "dc_imap.h"
 #include "dc_smtp.h"
