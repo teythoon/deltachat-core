@@ -470,7 +470,6 @@ cleanup:
 int dc_pgp_split_key(dc_context_t* context, const dc_key_t* private_in, dc_key_t* ret_public_key)
 {
 	int             success = 0;
-	sq_tpk_t        tsk;
 	sq_tpk_t        tpk;
 	void*           buf = NULL;
 	size_t          len = 0;
@@ -480,15 +479,14 @@ int dc_pgp_split_key(dc_context_t* context, const dc_key_t* private_in, dc_key_t
 		goto cleanup;
 	}
 
-	tsk = sq_tpk_from_bytes(context->sq, private_in->binary, private_in->bytes);
-	if (tsk==NULL) {
+	tpk = sq_tpk_from_bytes(context->sq, private_in->binary, private_in->bytes);
+	if (tpk==NULL) {
 		goto cleanup;
 	}
 
-	tpk = sq_tpk_to_public_key(tsk);
-	sq_tpk_free(tsk);
-
 	w = sq_writer_alloc(&buf, &len);
+	/* When we serialize a TPK, even if it originally contained
+	   secret keys, we only get the public parts.  */
 	sq_tpk_serialize(context->sq, tpk, w);
 	sq_tpk_free(tpk);
 	sq_writer_free(w);
