@@ -195,6 +195,7 @@ int dc_pgp_create_keypair(dc_context_t* context, const char* addr, dc_key_t* ret
 	int              success = 0;
 	char*            user_id = NULL;
 	sq_status_t      rc;
+	sq_tpk_builder_t builder = NULL;
 	sq_tpk_t         tpk = NULL;
 	sq_tsk_t         tsk = NULL;
 	void*            buf = NULL;
@@ -220,30 +221,14 @@ int dc_pgp_create_keypair(dc_context_t* context, const char* addr, dc_key_t* ret
 		user_id = dc_mprintf("<%s>", addr);
 	#endif
 
-	/* First, we generate a secret key and save it in
-	   ret_private_key.  */
-	tsk = sq_tsk_new(context->sq, user_id);
-	if (tsk==NULL) {
+	/* First, we generate a key and save the public part in
+	   ret_public_key.  */
+	builder = sq_tpk_builder_autocrypt();
+	tpk = sq_tpk_builder_generate(context->sq, builder);
+	builder = NULL;
+	if (tpk==NULL) {
 		goto cleanup;
 	}
-
-	w = sq_writer_alloc(&buf, &len);
-	rc = sq_tsk_serialize(context->sq, tsk, w);
-	if (rc!=SQ_STATUS_SUCCESS) {
-		goto cleanup;
-	}
-	sq_writer_free(w);
-	w = NULL;
-
-	dc_key_set_from_binary(ret_private_key, buf, len, DC_KEY_PUBLIC);
-	free(buf);
-	buf = NULL;
-	len = 0;
-
-	/* Second, we get a reference to the public parts, and save
-	   them to ret_public_key.  This is a reference that we don't
-	   need to free.  */
-	tpk = sq_tsk_tpk(tsk);
 
 	w = sq_writer_alloc(&buf, &len);
 	rc = sq_tpk_serialize(context->sq, tpk, w);
@@ -253,12 +238,32 @@ int dc_pgp_create_keypair(dc_context_t* context, const char* addr, dc_key_t* ret
 	sq_writer_free(w);
 	w = NULL;
 
-	dc_key_set_from_binary(ret_public_key, buf, len, DC_KEY_PRIVATE);
+	dc_key_set_from_binary(ret_public_key, buf, len, DC_KEY_PUBLIC);
+	free(buf);
+	buf = NULL;
+	len = 0;
+
+	/* Then, we convert the TPK into a TSK object to get the
+	   secret part.  */
+	tsk = sq_tpk_into_tsk(tpk);
+	tpk = NULL;
+
+	w = sq_writer_alloc(&buf, &len);
+	rc = sq_tsk_serialize(context->sq, tsk, w);
+	if (rc!=SQ_STATUS_SUCCESS) {
+		goto cleanup;
+	}
+	sq_writer_free(w);
+	w = NULL;
+
+	dc_key_set_from_binary(ret_private_key, buf, len, DC_KEY_PRIVATE);
 	success = 1;
 
 cleanup:
+	sq_tpk_builder_free(builder);
 	sq_writer_free(w);
 	free(buf);
+	sq_tpk_free(tpk);
 	sq_tsk_free(tsk);
 	free(user_id);
 	return success;
