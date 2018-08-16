@@ -393,7 +393,8 @@ int dc_pgp_pk_encrypt( dc_context_t*       context,
 	sink = sq_writer_alloc(ret_ctext, ret_ctext_bytes);
 
 	if (use_armor) {
-		sink = sq_armor_writer_new(sink, SQ_ARMOR_KIND_MESSAGE);
+		sink = sq_armor_writer_new(context->sq, sink, SQ_ARMOR_KIND_MESSAGE,
+					   NULL, 0);
 	}
 
 	recipients = calloc(raw_public_keys_for_encryption->count, sizeof(sq_tpk_t));
